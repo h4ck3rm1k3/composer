@@ -39,18 +39,22 @@ class Solver
     protected $branches = array();
     protected $problems = array();
     protected $learnedPool = array();
+    protected $io;
 
-    public function __construct(PolicyInterface $policy, Pool $pool, RepositoryInterface $installed)
+    public function __construct(PolicyInterface $policy, Pool $pool, RepositoryInterface $installed, $io)
     {
+        $this->io = $io;
         $this->policy = $policy;
         $this->pool = $pool;
         $this->installed = $installed;
-        $this->ruleSetGenerator = new RuleSetGenerator($policy, $pool);
+        $this->ruleSetGenerator = new RuleSetGenerator($policy, $pool, $io);
     }
 
     // aka solver_makeruledecisions
     private function makeAssertionRuleDecisions()
     {
+        $this->io->write('<info>Step1</info>');
+
         $decisionStart = count($this->decisions) - 1;
 
         $rulesCount = count($this->rules);
@@ -123,17 +127,28 @@ class Solver
 
     protected function setupInstalledMap()
     {
+        $this->io->write('<info>Step2</info>');
+        
         $this->installedMap = array();
         foreach ($this->installed->getPackages() as $package) {
-            $this->installedMap[$package->getId()] = $package;
+            $id = $package->getId();
+            $this->io->write("<info>package $id $package</info>");
+            $this->installedMap[$id] = $package;
         }
 
         foreach ($this->jobs as $job) {
-            switch ($job['cmd']) {
+            $cmd = $job['cmd'];
+            $pkg = $job['packageName'];
+            $this->io->write("<info>job $cmd $pkg</info>");
+            switch ($cmd) {
+
                 case 'update':
-                    $packages = $this->pool->whatProvides($job['packageName'], $job['constraint']);
+                    $this->io->write("<info>update</info>");
+                    $packages = $this->pool->whatProvides($pkg, $job['constraint']);
                     foreach ($packages as $package) {
-                        if (isset($this->installedMap[$package->getId()])) {
+                        $id = $package->getId();
+                        $this->io->write("<info>package2 $id $package</info>");
+                        if (isset($this->installedMap[$id])) {
                             $this->updateMap[$package->getId()] = true;
                         }
                     }
@@ -146,36 +161,48 @@ class Solver
                     break;
 
                 case 'install':
+                    $this->io->write("<info>install</info>");
                     if (!$this->pool->whatProvides($job['packageName'], $job['constraint'])) {
                         $problem = new Problem($this->pool);
                         $problem->addRule(new Rule($this->pool, array(), null, null, $job));
                         $this->problems[] = $problem;
                     }
+                    $this->io->write("<info>after install</info>");
                     break;
             }
         }
+        $this->io->write("<info>after step2</info>");
     }
 
     public function solve(Request $request)
     {
+        $this->io->write('<info>Step3</info>');
+
         $this->jobs = $request->getJobs();
 
         $this->setupInstalledMap();
 
+        $this->io->write("<info>step 10</info>");
         $this->decisions = new Decisions($this->pool);
 
+        $this->io->write("<info>step 11</info>");
         $this->rules = $this->ruleSetGenerator->getRulesFor($this->jobs, $this->installedMap);
         $this->watchGraph = new RuleWatchGraph;
 
+        $this->io->write("<info>step 12</info>");
         foreach ($this->rules as $rule) {
             $this->watchGraph->insert(new RuleWatchNode($rule));
         }
 
+        $this->io->write("<info>step 13</info>");
+
         /* make decisions based on job/update assertions */
         $this->makeAssertionRuleDecisions();
 
+        $this->io->write("<info>step 14</info>");
         $this->runSat(true);
 
+        $this->io->write("<info>step 15</info>");
         // decide to remove everything that's installed and undecided
         foreach ($this->installedMap as $packageId => $void) {
             if ($this->decisions->undecided($packageId)) {
@@ -183,9 +210,12 @@ class Solver
             }
         }
 
+        $this->io->write("<info>step 16</info>");
         if ($this->problems) {
             throw new SolverProblemsException($this->problems, $this->installedMap);
         }
+
+        $this->io->write("<info>step 17</info>");
 
         $transaction = new Transaction($this->policy, $this->pool, $this->installedMap, $this->decisions);
 
@@ -210,6 +240,7 @@ class Solver
      */
     protected function propagate($level)
     {
+        $this->io->write('<info>Step4</info>');
         while ($this->decisions->validOffset($this->propagateIndex)) {
             $decision = $this->decisions->atOffset($this->propagateIndex);
 
@@ -234,6 +265,7 @@ class Solver
      */
     private function revert($level)
     {
+        $this->io->write('<info>Step5</info>');
         while (!$this->decisions->isEmpty()) {
             $literal = $this->decisions->lastLiteral();
 
@@ -273,6 +305,7 @@ class Solver
      */
     private function setPropagateLearn($level, $literal, $disableRules, Rule $rule)
     {
+        $this->io->write('<info>Step6</info>');
         $level++;
 
         $this->decisions->decide($literal, $level, $rule);
@@ -336,6 +369,7 @@ class Solver
 
     protected function analyze($level, $rule)
     {
+        $this->io->write('<info>Step7</info>');
         $analyzedRule = $rule;
         $ruleLevel = 1;
         $num = 0;
@@ -442,6 +476,7 @@ class Solver
 
     private function analyzeUnsolvableRule($problem, $conflictRule)
     {
+        $this->io->write('<info>Step8</info>');
         $why = $conflictRule->getId();
 
         if ($conflictRule->getType() == RuleSet::TYPE_LEARNED) {
@@ -523,6 +558,7 @@ class Solver
 
     private function disableProblem($why)
     {
+        $this->io->write('<info>Step9</info>');
         $job = $why->getJob();
 
         if (!$job) {
@@ -541,6 +577,7 @@ class Solver
 
     private function resetSolver()
     {
+        $this->io->write('<info>Step10</info>');
         $this->decisions->reset();
 
         $this->propagateIndex = 0;
@@ -559,6 +596,7 @@ class Solver
     */
     private function enableDisableLearnedRules()
     {
+        $this->io->write('<info>Step11</info>');
         foreach ($this->rules->getIteratorFor(RuleSet::TYPE_LEARNED) as $rule) {
             $why = $this->learnedWhy[$rule->getId()];
             $problemRules = $this->learnedPool[$why];
@@ -581,6 +619,8 @@ class Solver
 
     private function runSat($disableRules = true)
     {
+        $this->io->write('<info>runSat</info>');
+
         $this->propagateIndex = 0;
 
         //   /*

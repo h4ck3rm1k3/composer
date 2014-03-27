@@ -104,6 +104,7 @@ class Installer
     protected $dryRun = false;
     protected $verbose = false;
     protected $update = false;
+    protected $update_slow = false;
     protected $runScripts = true;
     /**
      * Array of package names/globs flagged for update
@@ -257,7 +258,7 @@ class Installer
                         $request->install($link->getTarget(), $link->getConstraint());
                     }
 
-                    $solver = new Solver($policy, $pool, $installedRepo);
+                    $solver = new Solver($policy, $pool, $installedRepo, $this->io );
                     $ops = $solver->solve($request);
                     foreach ($ops as $op) {
                         if ($op->getJobType() === 'uninstall') {
@@ -355,7 +356,9 @@ class Installer
         }
 
         // creating requirements request
-        $request = $this->createRequest($pool, $this->package, $platformRepo);
+        $p= $this->package;
+        $this->io->write("<info>Request $p</info>");
+        $request = $this->createRequest($pool, $p, $platformRepo);
 
         if (!$installFromLock) {
             // remove unstable packages from the localRepo if they don't match the current stability settings
@@ -374,15 +377,20 @@ class Installer
         if ($this->update) {
             $this->io->write('<info>Updating dependencies'.($withDevReqs?' (including require-dev)':'').'</info>');
 
-            $request->updateAll();
-
-            if ($withDevReqs) {
-                $links = array_merge($this->package->getRequires(), $this->package->getDevRequires());
+            if ($this->update_slow) {
+                $request->updateAll();
+                if ($withDevReqs) {
+                    $links = array_merge($this->package->getRequires(), $this->package->getDevRequires());
+                } else {
+                    $links = $this->package->getRequires();
+                }
             } else {
                 $links = $this->package->getRequires();
             }
 
             foreach ($links as $link) {
+
+                $this->io->write("<info>link $link</info>");
                 $request->install($link->getTarget(), $link->getConstraint());
             }
 
@@ -459,20 +467,25 @@ class Installer
         // force dev packages to have the latest links if we update or install from a (potentially new) lock
         $this->processDevPackages($localRepo, $pool, $policy, $repositories, $lockedRepository, $installFromLock, 'force-links');
 
+        $this->io->write("<info>Solver</info>");
         // solve dependencies
-        $solver = new Solver($policy, $pool, $installedRepo);
+        $solver = new Solver($policy, $pool, $installedRepo, $this->io);
         try {
             $operations = $solver->solve($request);
         } catch (SolverProblemsException $e) {
             $this->io->write('<error>Your requirements could not be resolved to an installable set of packages.</error>');
             $this->io->write($e->getMessage());
-
+            
             return max(1, $e->getCode());
         }
-
-        // force dev packages to be updated if we update or install from a (potentially new) lock
         $operations = $this->processDevPackages($localRepo, $pool, $policy, $repositories, $lockedRepository, $installFromLock, 'force-updates', $operations);
 
+
+        $this->io->write("<info>After Solver</info>");
+
+        // force dev packages to be updated if we update or install from a (potentially new) lock
+
+        
         // execute operations
         if (!$operations) {
             $this->io->write('Nothing to install or update');
@@ -481,11 +494,18 @@ class Installer
         $operations = $this->movePluginsToFront($operations);
 
         foreach ($operations as $operation) {
+            $jt = $operation->getJobType();
+            $n = $operation->getPackage()->getPrettyName();
+            $this->io->write("jobtype $jt name $n");
+
             // collect suggestions
-            if ('install' === $operation->getJobType()) {
+            if ('install' === $jt) {
                 foreach ($operation->getPackage()->getSuggests() as $target => $reason) {
+                    
+                    $this->io->write("jobtype $jt name $n $reason");
+
                     $this->suggestedPackages[] = array(
-                        'source' => $operation->getPackage()->getPrettyName(),
+                        'source' => $n,
                         'target' => $target,
                         'reason' => $reason,
                     );

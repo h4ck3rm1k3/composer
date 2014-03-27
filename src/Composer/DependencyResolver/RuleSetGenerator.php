@@ -27,11 +27,13 @@ class RuleSetGenerator
     protected $installedMap;
     protected $whitelistedMap;
     protected $addedMap;
+    protected $io;
 
-    public function __construct(PolicyInterface $policy, Pool $pool)
+    public function __construct(PolicyInterface $policy, Pool $pool, $io)
     {
         $this->policy = $policy;
         $this->pool = $pool;
+        $this->io = $io;
     }
 
     /**
@@ -145,6 +147,8 @@ class RuleSetGenerator
 
     protected function whitelistFromPackage(PackageInterface $package)
     {
+        $this->io->write("<info>whitelistFromPackage $package</info>");
+
         $workQueue = new \SplQueue;
         $workQueue->enqueue($package);
 
@@ -180,6 +184,7 @@ class RuleSetGenerator
 
     protected function addRulesForPackage(PackageInterface $package)
     {
+        $this->io->write("<info>addRulesForPackage(PackageInterface $package)</info>");
         $workQueue = new \SplQueue;
         $workQueue->enqueue($package);
 
@@ -191,61 +196,51 @@ class RuleSetGenerator
 
             $this->addedMap[$package->getId()] = true;
 
-            foreach ($package->getRequires() as $link) {
-                $possibleRequires = $this->pool->whatProvides($link->getTarget(), $link->getConstraint());
-
-                $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createRequireRule($package, $possibleRequires, Rule::RULE_PACKAGE_REQUIRES, $link));
-
-                foreach ($possibleRequires as $require) {
-                    $workQueue->enqueue($require);
-                }
-            }
-
-            foreach ($package->getConflicts() as $link) {
-                $possibleConflicts = $this->pool->whatProvides($link->getTarget(), $link->getConstraint());
-
-                foreach ($possibleConflicts as $conflict) {
-                    $this->addRule(RuleSet::TYPE_PACKAGE, $this->createConflictRule($package, $conflict, Rule::RULE_PACKAGE_CONFLICT, $link));
-                }
-            }
-
-            // check obsoletes and implicit obsoletes of a package
-            $isInstalled = (isset($this->installedMap[$package->getId()]));
-
-            foreach ($package->getReplaces() as $link) {
-                $obsoleteProviders = $this->pool->whatProvides($link->getTarget(), $link->getConstraint());
-
-                foreach ($obsoleteProviders as $provider) {
-                    if ($provider === $package) {
-                        continue;
-                    }
-
-                    if (!$this->obsoleteImpossibleForAlias($package, $provider)) {
-                        $reason = ($isInstalled) ? Rule::RULE_INSTALLED_PACKAGE_OBSOLETES : Rule::RULE_PACKAGE_OBSOLETES;
-                        $this->addRule(RuleSet::TYPE_PACKAGE, $this->createConflictRule($package, $provider, $reason, $link));
-                    }
-                }
-            }
-
-            $obsoleteProviders = $this->pool->whatProvides($package->getName(), null);
-
-            foreach ($obsoleteProviders as $provider) {
-                if ($provider === $package) {
-                    continue;
-                }
-
-                if (($package instanceof AliasPackage) && $package->getAliasOf() === $provider) {
-                    $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createRequireRule($package, array($provider), Rule::RULE_PACKAGE_ALIAS, $package));
-                } elseif (!$this->obsoleteImpossibleForAlias($package, $provider)) {
-                    $reason = ($package->getName() == $provider->getName()) ? Rule::RULE_PACKAGE_SAME_NAME : Rule::RULE_PACKAGE_IMPLICIT_OBSOLETES;
-                    $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createConflictRule($package, $provider, $reason, $package));
-                }
-            }
+            /* foreach ($package->getRequires() as $link) { */
+            /*     $possibleRequires = $this->pool->whatProvides($link->getTarget(), $link->getConstraint()); */
+            /*     $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createRequireRule($package, $possibleRequires, Rule::RULE_PACKAGE_REQUIRES, $link)); */
+            /*     foreach ($possibleRequires as $require) { */
+            /*         $workQueue->enqueue($require); */
+            /*     } */
+            /* } */
+            /* foreach ($package->getConflicts() as $link) { */
+            /*     $possibleConflicts = $this->pool->whatProvides($link->getTarget(), $link->getConstraint()); */
+            /*     foreach ($possibleConflicts as $conflict) { */
+            /*         $this->addRule(RuleSet::TYPE_PACKAGE, $this->createConflictRule($package, $conflict, Rule::RULE_PACKAGE_CONFLICT, $link)); */
+            /*     } */
+            /* } */
+            /* // check obsoletes and implicit obsoletes of a package */
+            /* $isInstalled = (isset($this->installedMap[$package->getId()])); */
+            /* foreach ($package->getReplaces() as $link) { */
+            /*     $obsoleteProviders = $this->pool->whatProvides($link->getTarget(), $link->getConstraint()); */
+            /*     foreach ($obsoleteProviders as $provider) { */
+            /*         if ($provider === $package) { */
+            /*             continue; */
+            /*         } */
+            /*         if (!$this->obsoleteImpossibleForAlias($package, $provider)) { */
+            /*             $reason = ($isInstalled) ? Rule::RULE_INSTALLED_PACKAGE_OBSOLETES : Rule::RULE_PACKAGE_OBSOLETES; */
+            /*             $this->addRule(RuleSet::TYPE_PACKAGE, $this->createConflictRule($package, $provider, $reason, $link)); */
+            /*         } */
+            /*     } */
+            /* } */
+            /* $obsoleteProviders = $this->pool->whatProvides($package->getName(), null); */
+            /* foreach ($obsoleteProviders as $provider) { */
+            /*     if ($provider === $package) { */
+            /*         continue; */
+            /*     } */
+            /*     if (($package instanceof AliasPackage) && $package->getAliasOf() === $provider) { */
+            /*         $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createRequireRule($package, array($provider), Rule::RULE_PACKAGE_ALIAS, $package)); */
+            /*     } elseif (!$this->obsoleteImpossibleForAlias($package, $provider)) { */
+            /*         $reason = ($package->getName() == $provider->getName()) ? Rule::RULE_PACKAGE_SAME_NAME : Rule::RULE_PACKAGE_IMPLICIT_OBSOLETES; */
+            /*         $this->addRule(RuleSet::TYPE_PACKAGE, $rule = $this->createConflictRule($package, $provider, $reason, $package)); */
+            /*     } */
+            /* } */
         }
     }
 
     protected function obsoleteImpossibleForAlias($package, $provider)
     {
+        $this->io->write("<info>obsoleteImpossibleForAlias $package, $provider </info>");
         $packageIsAlias = $package instanceof AliasPackage;
         $providerIsAlias = $provider instanceof AliasPackage;
 
@@ -266,6 +261,7 @@ class RuleSetGenerator
      */
     private function addRulesForUpdatePackages(PackageInterface $package)
     {
+        $this->io->write('<info>Step23</info>');
         $updates = $this->policy->findUpdatePackages($this->pool, $this->installedMap, $package);
 
         foreach ($updates as $update) {
@@ -275,6 +271,7 @@ class RuleSetGenerator
 
     private function whitelistFromUpdatePackages(PackageInterface $package)
     {
+        $this->io->write('<info>Step24</info>');
         $updates = $this->policy->findUpdatePackages($this->pool, $this->installedMap, $package, true);
 
         foreach ($updates as $update) {
@@ -284,6 +281,7 @@ class RuleSetGenerator
 
     protected function whitelistFromJobs()
     {
+        $this->io->write('<info>Step25</info>');
         foreach ($this->jobs as $job) {
             switch ($job['cmd']) {
                 case 'install':
@@ -298,12 +296,15 @@ class RuleSetGenerator
 
     protected function addRulesForJobs()
     {
+        $this->io->write('<info>addRulesForJobs</info>');
         foreach ($this->jobs as $job) {
-            switch ($job['cmd']) {
+            $cmd = $job['cmd'];
+            switch ($cmd) {
                 case 'install':
                     $packages = $this->pool->whatProvides($job['packageName'], $job['constraint']);
                     if ($packages) {
                         foreach ($packages as $package) {
+                            print ("package $package $cmd\n"); 
                             if (!isset($this->installedMap[$package->getId()])) {
                                 $this->addRulesForPackage($package);
                             }
@@ -328,27 +329,37 @@ class RuleSetGenerator
 
     public function getRulesFor($jobs, $installedMap)
     {
+        $this->io->write("<info>getRulesFor jobs, </info>");
         $this->jobs = $jobs;
         $this->rules = new RuleSet;
         $this->installedMap = $installedMap;
 
-        $this->whitelistedNames = array();
-        foreach ($this->installedMap as $package) {
-            $this->whitelistFromPackage($package);
-            $this->whitelistFromUpdatePackages($package);
-        }
-        $this->whitelistFromJobs();
-
-        $this->pool->setWhitelist($this->whitelistedMap);
+        /* $this->whitelistedNames = array(); */
+        /* foreach ($this->installedMap as $package) { */
+        /*     $this->whitelistFromPackage($package); */
+        /*     $this->whitelistFromUpdatePackages($package); */
+        /* } */
+        /* $this->whitelistFromJobs(); */
+        /* $this->pool->setWhitelist($this->whitelistedMap); */
 
         $this->addedMap = array();
-        foreach ($this->installedMap as $package) {
-            $this->addRulesForPackage($package);
-            $this->addRulesForUpdatePackages($package);
-        }
+        /* foreach ($this->installedMap as $package) { */
+        /*     foreach ($package as $f) { */
+        /*         print($f); */
+        /*     } */
+            
+        /*     $this->addRulesForPackage($package); */
+        /*     //$this->addRulesForUpdatePackages($package); */
+        /* } */
 
         $this->addRulesForJobs();
 
+        //print_r($this->rules);
+        foreach ($this->rules as $r) {
+            foreach ($r as $f) {
+                print($f);
+            }}
+            
         return $this->rules;
     }
 }

@@ -30,16 +30,19 @@ class GitDownloader extends VcsDownloader
     {
         $this->cleanEnv();
         $path = $this->normalizePath($path);
+        print "Path: $path";
 
         $ref = $package->getSourceReference();
         $flag = defined('PHP_WINDOWS_VERSION_MAJOR') ? '/D ' : '';
-        $command = 'git clone --no-checkout %s %s && cd '.$flag.'%2$s && git remote add composer %1$s && git fetch composer';
-        $this->io->write("    Cloning ".$ref);
+        $command = 'git submodule add -f %s %s';
+
 
         $commandCallable = function($url) use ($ref, $path, $command) {
-            return sprintf($command, escapeshellarg($url), escapeshellarg($path), escapeshellarg($ref));
+            $val =sprintf($command, escapeshellarg($url), escapeshellarg($path));
+            $this->io->write(" Cloning  $val");
+            return $val;
         };
-
+        
         $this->runCommand($commandCallable, $package->getSourceUrl(), $path, true);
         $this->setPushUrl($package, $path);
 
